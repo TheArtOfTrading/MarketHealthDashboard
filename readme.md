@@ -2,7 +2,7 @@
 
 Download the pre-compiled .exe file under [releases](https://github.com/TheArtOfTrading/MarketHealthDashboard/releases/tag/release) - make sure Norgate Data is running when you open this software.
 
-# Trading Dashboard - What is this?
+# Macro Market Trading Dashboard - What is this?
 
 A lightweight Python desktop dashboard for exploring market data, sector rotation, market health, global indices, and momentum rankings using Norgate Data.
 
