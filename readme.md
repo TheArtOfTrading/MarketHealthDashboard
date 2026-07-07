@@ -6,6 +6,8 @@ Download the pre-compiled .exe file under [releases](https://github.com/TheArtOf
 
 A lightweight Python desktop dashboard for exploring market data, sector rotation, market health, global indices, and momentum rankings using Norgate Data.
 
+<img width="384" height="205" alt="image" src="https://github.com/user-attachments/assets/e6333fe9-d84c-4101-9413-6cca0d3777f3" />
+
 The app provides a simple GUI launcher for multiple Matplotlib-based dashboards, including:
 
 * Market Health dashboard
