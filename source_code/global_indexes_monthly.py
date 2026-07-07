@@ -25,6 +25,10 @@ MARKET_INDEXES = {
         "region": "North America",
         "symbol": "$SPX",
     },
+    "NASDAQ 100 (US)": {
+        "region": "North America",
+        "symbol": "$NDX",
+    },
     "S&P/TSX Composite (Canada)": {
         "region": "North America",
         "symbol": "$SPTSX",
