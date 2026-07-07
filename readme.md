@@ -33,15 +33,29 @@ This project depends on:
 * tkinter
 * Norgate Data installed and configured locally
 
+## Norgate Data
+
+You must have Norgate Data for this tool to function: https://norgatedata.com/stockmarketpackages.php
+
+I use it with the following data plans. If you are missing a data plan then the tool will obviously not be able to load data for that market - any data plan tier will work with this tool as it only uses market data for currently listed assets and does not reference historical constituents:
+
+* US Stocks
+* Australian Stocks
+* Canadian Stocks
+* Forex
+* I do not use Futures with this tool.
+
 ## Usage
 
-Run the main launcher script:
+Download the pre-compiled .exe file under releases - make sure Norgate Data is running when you open this software.
+
+Or run the main launcher script:
 
 ```bash
 python trading_dashboard_app.py
 ```
 
-Or package it into a Windows executable using PyInstaller.
+Or package it into a Windows executable using PyInstaller / `build.bat`.
 
 ## Disclaimer
 
