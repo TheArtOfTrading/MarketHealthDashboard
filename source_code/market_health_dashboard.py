@@ -12,6 +12,16 @@ START_DATE = "2000-01-01"
 # This script does not remove the current month because it is daily EOD-based.
 PRICE_ADJUSTMENT = norgatedata.StockPriceAdjustmentType.NONE
 
+
+# Missing data policy:
+# "omit" = skip unavailable symbols/ratios completely. Recommended.
+# "blank" = keep unavailable columns as blank/NaN where possible.
+# "zero" = fill calculated return tables with 0.0 where possible.
+#
+# Note: Raw Open/Close price data and breadth readings are never zero-filled.
+# Zero-filling only applies to calculated return tables.
+MISSING_DATA_POLICY = "omit"
+
 DEFAULT_MODE = "1D"
 
 MODE_OPTIONS = ["1D", "MTD", "1M", "3M", "6M", "12M", "YTD"]
@@ -469,7 +479,10 @@ def get_daily_ohlc(symbol: str, label: str) -> pd.DataFrame:
     )
 
     if df is None or df.empty:
-        raise ValueError(f"No data returned for {label} / {symbol}")
+        raise ValueError(
+            f"No data returned for {label} / {symbol}. "
+            f"This symbol may be unavailable, or the required Norgate data package may not be installed."
+        )
 
     if "Date" in df.columns:
         df["Date"] = pd.to_datetime(df["Date"])
@@ -478,7 +491,11 @@ def get_daily_ohlc(symbol: str, label: str) -> pd.DataFrame:
         df.index = pd.to_datetime(df.index)
 
     if "Close" not in df.columns:
-        raise ValueError(f"No Close column found for {label} / {symbol}. Columns: {list(df.columns)}")
+        raise ValueError(
+            f"No Close column found for {label} / {symbol}. "
+            f"This symbol may be unavailable, incomplete, or unsupported by the user's Norgate subscription. "
+            f"Columns: {list(df.columns)}"
+        )
 
     # Some synthetic/index series may not have an Open column.
     # Fall back to Close so the dashboard still works.
@@ -489,7 +506,10 @@ def get_daily_ohlc(symbol: str, label: str) -> pd.DataFrame:
     df = df[["Open", "Close"]].dropna()
 
     if df.empty:
-        raise ValueError(f"OHLC data is empty for {label} / {symbol}")
+        raise ValueError(
+            f"OHLC data is empty for {label} / {symbol}. "
+            f"This symbol may be unavailable in the user's Norgate subscription."
+        )
 
     return df.sort_index()
 
@@ -578,6 +598,33 @@ def calculate_metric_tables(open_df: pd.DataFrame, close_df: pd.DataFrame) -> di
     return tables
 
 
+def apply_metric_table_missing_data_policy(metric_tables: dict, expected_columns: list[str]) -> dict:
+    cleaned_tables = {}
+
+    for mode, table in metric_tables.items():
+        if table is None or table.empty:
+            cleaned_tables[mode] = pd.DataFrame()
+            continue
+
+        table = table.sort_index()
+
+        if MISSING_DATA_POLICY in ["blank", "zero"]:
+            table = table.reindex(columns=expected_columns)
+
+        if MISSING_DATA_POLICY == "zero":
+            table = table.fillna(0.0).dropna(how="all")
+
+        elif MISSING_DATA_POLICY == "blank":
+            table = table.dropna(how="all")
+
+        else:
+            table = table.dropna(axis=1, how="all").dropna(how="all")
+
+        cleaned_tables[mode] = table
+
+    return cleaned_tables
+
+
 def classify_breadth_value(value: float) -> str:
     if pd.isna(value):
         return "Unknown"
@@ -651,6 +698,7 @@ def load_market_universe(universe_name: str, definitions: dict, data_cache: dict
     close_df = pd.DataFrame(close_tables).dropna(how="all").sort_index()
 
     metric_tables = calculate_metric_tables(open_df, close_df)
+    metric_tables = apply_metric_table_missing_data_policy(metric_tables, list(definitions.keys()))
 
     return {
         "universe_name": universe_name,
@@ -707,6 +755,7 @@ def load_ratio_universe(universe_name: str, definitions: dict, data_cache: dict)
     close_df = pd.DataFrame(ratio_close_tables).dropna(how="all").sort_index()
 
     metric_tables = calculate_metric_tables(open_df, close_df)
+    metric_tables = apply_metric_table_missing_data_policy(metric_tables, list(definitions.keys()))
 
     return {
         "universe_name": universe_name,

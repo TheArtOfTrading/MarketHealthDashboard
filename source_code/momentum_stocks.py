@@ -62,6 +62,31 @@ INCLUDE_CURRENT_MONTH = False
 PRICE_ADJUSTMENT = norgatedata.StockPriceAdjustmentType.CAPITAL
 
 
+# Missing data policy:
+# "omit" = skip unavailable symbols completely. Recommended.
+# "blank" = keep unavailable columns as blank/NaN where possible.
+# "zero" = fill calculated ranking tables with 0.0 where possible.
+MISSING_DATA_POLICY = "omit"
+
+
+def apply_ranking_data_policy(df: pd.DataFrame, expected_columns: list[str] | None = None) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = df.sort_index()
+
+    if expected_columns is not None and MISSING_DATA_POLICY in ["blank", "zero"]:
+        df = df.reindex(columns=expected_columns)
+
+    if MISSING_DATA_POLICY == "zero":
+        return df.fillna(0.0).dropna(how="all")
+
+    if MISSING_DATA_POLICY == "blank":
+        return df.dropna(how="all")
+
+    return df.dropna(axis=1, how="all").dropna(how="all")
+
+
 def normalize_watchlist_name(name: str) -> str:
     return "".join(ch.lower() for ch in name if ch.isalnum())
 
@@ -141,7 +166,10 @@ def get_daily_ohlc(symbol: str, start_date: str) -> pd.DataFrame:
     )
 
     if df is None or df.empty:
-        raise ValueError(f"No data returned for {symbol}")
+        raise ValueError(
+            f"No data returned for {symbol}. "
+            f"This symbol may be unavailable, or the required Norgate data package may not be installed."
+        )
 
     if "Date" in df.columns:
         df["Date"] = pd.to_datetime(df["Date"])
@@ -153,12 +181,19 @@ def get_daily_ohlc(symbol: str, start_date: str) -> pd.DataFrame:
 
     for col in required_columns:
         if col not in df.columns:
-            raise ValueError(f"No {col} column found for {symbol}. Columns: {list(df.columns)}")
+            raise ValueError(
+                f"No {col} column found for {symbol}. "
+                f"This symbol may be unavailable, incomplete, or unsupported by the user's Norgate subscription. "
+                f"Columns: {list(df.columns)}"
+            )
 
     df = df[["Open", "Close"]].dropna()
 
     if df.empty:
-        raise ValueError(f"OHLC data is empty for {symbol}")
+        raise ValueError(
+            f"OHLC data is empty for {symbol}. "
+            f"This symbol may be unavailable in the user's Norgate subscription."
+        )
 
     return df.sort_index()
 
@@ -373,9 +408,11 @@ def load_index_metric_tables(index_name: str) -> dict:
     if not roc252_tables and not roc1_tables:
         raise ValueError(f"No stock data was loaded for {index_name}.")
 
-    roc1_df = pd.DataFrame(roc1_tables).dropna(how="all").sort_index()
-    roc252_df = pd.DataFrame(roc252_tables).dropna(how="all").sort_index()
-    ytd_df = pd.DataFrame(ytd_tables).dropna(how="all").sort_index()
+    expected_columns = symbols
+
+    roc1_df = apply_ranking_data_policy(pd.DataFrame(roc1_tables), expected_columns)
+    roc252_df = apply_ranking_data_policy(pd.DataFrame(roc252_tables), expected_columns)
+    ytd_df = apply_ranking_data_policy(pd.DataFrame(ytd_tables), expected_columns)
 
     return {
         "index_name": index_name,

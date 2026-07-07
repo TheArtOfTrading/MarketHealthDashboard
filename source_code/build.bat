@@ -11,6 +11,7 @@ python -m PyInstaller ^
   --hidden-import=asx_sector_dashboard ^
   --hidden-import=global_indexes_monthly ^
   --hidden-import=momentum_stocks ^
+  --hidden-import=forex_dashboard ^
   --hidden-import=norgatedata ^
   --hidden-import=logbook ^
   --hidden-import=matplotlib.backends.backend_tkagg ^

@@ -174,6 +174,49 @@ DEFAULT_RETURN_MODE = "EOD"
 PRICE_ADJUSTMENT = norgatedata.StockPriceAdjustmentType.NONE
 
 
+# Missing data policy:
+# "omit" = skip unavailable symbols completely. Recommended.
+# "blank" = keep unavailable columns as blank/NaN where possible.
+# "zero" = fill calculated return tables with 0.0 where possible.
+#
+# Note: Open/Close price tables are never zero-filled because 0 is not a valid
+# placeholder for a missing price. Zero-filling only applies to calculated returns.
+MISSING_DATA_POLICY = "omit"
+
+
+def apply_price_data_policy(df: pd.DataFrame, expected_columns: list[str] | None = None) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = df.sort_index()
+
+    if expected_columns is not None and MISSING_DATA_POLICY in ["blank", "zero"]:
+        df = df.reindex(columns=expected_columns)
+
+    if MISSING_DATA_POLICY == "omit":
+        return df.dropna(axis=1, how="all").dropna(how="all")
+
+    return df.dropna(how="all")
+
+
+def apply_return_data_policy(df: pd.DataFrame, expected_columns: list[str] | None = None) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = df.sort_index()
+
+    if expected_columns is not None and MISSING_DATA_POLICY in ["blank", "zero"]:
+        df = df.reindex(columns=expected_columns)
+
+    if MISSING_DATA_POLICY == "zero":
+        return df.fillna(0.0).dropna(how="all")
+
+    if MISSING_DATA_POLICY == "blank":
+        return df.dropna(how="all")
+
+    return df.dropna(axis=1, how="all").dropna(how="all")
+
+
 # These are filled by get_monthly_ohlc().
 # This keeps compatibility with your main dashboard, which currently calls:
 # monthly_opens, monthly_closes = get_monthly_ohlc()
@@ -191,7 +234,10 @@ def get_daily_ohlc(symbol: str, label: str, start_date: str) -> pd.DataFrame:
     )
 
     if df is None or df.empty:
-        raise ValueError(f"No data returned for {label} / {symbol}")
+        raise ValueError(
+            f"No data returned for {label} / {symbol}. "
+            f"This symbol may be unavailable, or the required Norgate data package may not be installed."
+        )
 
     if "Date" in df.columns:
         df["Date"] = pd.to_datetime(df["Date"])
@@ -203,12 +249,19 @@ def get_daily_ohlc(symbol: str, label: str, start_date: str) -> pd.DataFrame:
 
     for col in required_columns:
         if col not in df.columns:
-            raise ValueError(f"No {col} column found for {label} / {symbol}. Columns: {list(df.columns)}")
+            raise ValueError(
+                f"No {col} column found for {label} / {symbol}. "
+                f"This symbol may be unavailable, incomplete, or unsupported by the user's Norgate subscription. "
+                f"Columns: {list(df.columns)}"
+            )
 
     df = df[["Open", "Close"]].dropna()
 
     if df.empty:
-        raise ValueError(f"OHLC data is empty for {label} / {symbol}")
+        raise ValueError(
+            f"OHLC data is empty for {label} / {symbol}. "
+            f"This symbol may be unavailable in the user's Norgate subscription."
+        )
 
     return df.sort_index()
 
@@ -271,11 +324,13 @@ def get_monthly_ohlc() -> tuple[pd.DataFrame, pd.DataFrame]:
     if not monthly_closes:
         raise ValueError("No index data was loaded. Check the symbols in Norgate Data Viewer.")
 
-    _LAST_DAILY_OPENS = pd.DataFrame(daily_opens).dropna(how="all").sort_index()
-    _LAST_DAILY_CLOSES = pd.DataFrame(daily_closes).dropna(how="all").sort_index()
+    expected_columns = list(MARKET_INDEXES.keys())
 
-    monthly_opens_df = pd.DataFrame(monthly_opens).dropna(how="all").sort_index()
-    monthly_closes_df = pd.DataFrame(monthly_closes).dropna(how="all").sort_index()
+    _LAST_DAILY_OPENS = apply_price_data_policy(pd.DataFrame(daily_opens), expected_columns)
+    _LAST_DAILY_CLOSES = apply_price_data_policy(pd.DataFrame(daily_closes), expected_columns)
+
+    monthly_opens_df = apply_price_data_policy(pd.DataFrame(monthly_opens), expected_columns)
+    monthly_closes_df = apply_price_data_policy(pd.DataFrame(monthly_closes), expected_columns)
 
     return monthly_opens_df, monthly_closes_df
 
@@ -347,6 +402,12 @@ def calculate_return_tables(monthly_opens: pd.DataFrame, monthly_closes: pd.Data
     # Year-to-date return:
     # January first trading day open -> selected confirmed month-end close.
     ytd_returns = calculate_ytd_returns(monthly_opens, monthly_closes)
+
+    expected_columns = list(monthly_closes.columns)
+
+    monthly_returns = apply_return_data_policy(monthly_returns, expected_columns)
+    yearly_returns = apply_return_data_policy(yearly_returns, expected_columns)
+    ytd_returns = apply_return_data_policy(ytd_returns, expected_columns)
 
     return monthly_returns, yearly_returns, ytd_returns
 
