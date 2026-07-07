@@ -1,11 +1,17 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import norgatedata
-from matplotlib.widgets import Button
+from matplotlib.widgets import Button, CheckButtons
 from matplotlib.patches import Patch
 
 
 MARKET_INDEXES = {
+    # Crypto
+    "S&P Crypto MegaCap USD": {
+        "region": "Crypto",
+        "symbol": "$SPCMC",
+    },
+    
     # Global
     "Dow Jones Global": {
         "region": "Global",
@@ -159,6 +165,7 @@ REGION_COLORS = {
     "Latin America": "#2ca02c",
     "Africa": "#ff7f0e",
     "Global": "#666666",
+    "Crypto": "#ffe300",
 }
 
 
@@ -186,6 +193,13 @@ PRICE_ADJUSTMENT = norgatedata.StockPriceAdjustmentType.NONE
 # Note: Open/Close price tables are never zero-filled because 0 is not a valid
 # placeholder for a missing price. Zero-filling only applies to calculated returns.
 MISSING_DATA_POLICY = "omit"
+
+
+# Prevent 24/7 assets like crypto from forcing EOD mode onto dates
+# where normal equity/index markets have no fresh bar.
+#
+# This keeps EOD mode anchored to normal global equity market dates.
+EOD_ANCHOR_COLUMN = "S&P 500 (US)"
 
 
 def apply_price_data_policy(df: pd.DataFrame, expected_columns: list[str] | None = None) -> pd.DataFrame:
@@ -339,7 +353,7 @@ def get_monthly_ohlc() -> tuple[pd.DataFrame, pd.DataFrame]:
     return monthly_opens_df, monthly_closes_df
 
 
-def calculate_eod_returns(daily_closes: pd.DataFrame) -> pd.DataFrame:
+def calculate_eod_returns(daily_closes: pd.DataFrame, anchor_column: str | None = EOD_ANCHOR_COLUMN) -> pd.DataFrame:
     if daily_closes is None or daily_closes.empty:
         return pd.DataFrame()
 
@@ -360,9 +374,20 @@ def calculate_eod_returns(daily_closes: pd.DataFrame) -> pd.DataFrame:
     eod_df = pd.DataFrame(eod_returns).dropna(how="all").sort_index()
 
     # For global indices, different markets have different holidays and data timestamps.
-    # Forward filling the *latest available daily return* keeps the global dashboard populated
-    # when one market is closed and another has updated.
+    # Forward filling keeps the dashboard populated when one market is closed and another has updated.
     eod_df = eod_df.ffill()
+
+    # Important:
+    # Crypto can have weekend / holiday / 24-7 dates that normal equity indices do not have.
+    # If we allow those dates, the chart can be pulled onto a crypto-only date.
+    #
+    # So EOD mode is anchored to the S&P 500 date index by default.
+    if anchor_column is not None and anchor_column in daily_closes.columns:
+        anchor_dates = daily_closes.index[daily_closes[anchor_column].notna()]
+        common_dates = eod_df.index.intersection(anchor_dates)
+
+        if len(common_dates) > 0:
+            eod_df = eod_df.loc[common_dates]
 
     return eod_df.dropna(how="all")
 
@@ -416,6 +441,10 @@ def calculate_return_tables(monthly_opens: pd.DataFrame, monthly_closes: pd.Data
     return monthly_returns, yearly_returns, ytd_returns
 
 
+def is_crypto_index(name: str) -> bool:
+    return MARKET_INDEXES.get(name, {}).get("region") == "Crypto"
+
+
 class MonthlyIndexBarViewer:
     def __init__(
         self,
@@ -452,6 +481,7 @@ class MonthlyIndexBarViewer:
         self.static_order = list(self.return_tables["Monthly"].columns)
         self.period_index = len(self.periods) - 1
         self.sort_by_gain = False
+        self.include_crypto = True
 
         # Prevent one mouse click from firing twice.
         self.last_click_time = 0
@@ -465,6 +495,7 @@ class MonthlyIndexBarViewer:
             top=0.90,
         )
 
+        crypto_ax = self.fig.add_axes([0.015, 0.935, 0.12, 0.045])
         prev_ax = self.fig.add_axes([0.22, 0.045, 0.12, 0.045])
         mode_ax = self.fig.add_axes([0.38, 0.045, 0.16, 0.045])
         sort_ax = self.fig.add_axes([0.58, 0.045, 0.16, 0.045])
@@ -474,11 +505,13 @@ class MonthlyIndexBarViewer:
         self.mode_button = Button(mode_ax, f"Mode: {self.return_mode}")
         self.sort_button = Button(sort_ax, "Sort: On")
         self.next_button = Button(next_ax, "Next")
+        self.crypto_checkbox = CheckButtons(crypto_ax, ["Crypto"], [self.include_crypto])
 
         self.prev_button.on_clicked(self.previous_period)
         self.mode_button.on_clicked(self.toggle_return_mode)
         self.sort_button.on_clicked(self.toggle_sort)
         self.next_button.on_clicked(self.next_period)
+        self.crypto_checkbox.on_clicked(self.toggle_crypto)
 
         self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
 
@@ -546,9 +579,16 @@ class MonthlyIndexBarViewer:
 
         return True
 
+    def toggle_crypto(self, label=None):
+        self.include_crypto = not self.include_crypto
+        self.draw()
+
     def get_latest_values(self) -> tuple[pd.Timestamp, pd.Series]:
         period = self.get_current_period()
         latest = self.returns.loc[period].dropna()
+
+        if not self.include_crypto:
+            latest = latest[[name for name in latest.index if not is_crypto_index(name)]]
 
         if self.sort_by_gain:
             latest = latest.sort_values(ascending=False)
@@ -634,9 +674,17 @@ class MonthlyIndexBarViewer:
                 fontsize=8,
             )
 
+        visible_regions = []
+
+        for name in latest.index:
+            region = MARKET_INDEXES.get(name, {}).get("region", "Other")
+
+            if region not in visible_regions:
+                visible_regions.append(region)
+
         legend_items = [
-            Patch(facecolor=color, label=region)
-            for region, color in REGION_COLORS.items()
+            Patch(facecolor=REGION_COLORS.get(region, "gray"), label=region)
+            for region in visible_regions
         ]
 
         self.ax.legend(

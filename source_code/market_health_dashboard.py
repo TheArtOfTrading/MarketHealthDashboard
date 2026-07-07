@@ -1,7 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import norgatedata
-from matplotlib.widgets import Button
+from matplotlib.widgets import Button, CheckButtons
 from matplotlib.patches import Patch
 from matplotlib.backend_bases import MouseButton
 
@@ -54,6 +54,7 @@ GROUP_COLORS = {
     "Credit": "#ff7f0e",
     "Commodity": "#8c564b",
     "Currency": "#7f7f7f",
+    "Crypto": "#ffe300",
     "Sector": "#1f77b4",
     "Ratio": "#bcbd22",
     "Defensive": "#2ca02c",
@@ -74,6 +75,10 @@ BREADTH_STATUS_COLORS = {
 
 
 US_MACRO_MARKETS = {
+    "Crypto MegaCap USD": {
+        "candidates": ["$SPCMC"],
+        "group": "Crypto",
+    },
     "VIX": {
         "candidates": ["$VIX", "VXX", "VIXY"],
         "group": "Volatility",
@@ -821,6 +826,23 @@ def load_breadth_universe(universe_name: str, definitions: dict, data_cache: dic
     }
 
 
+def filter_metric_table_to_anchor_dates(metric_table: pd.DataFrame, anchor_column: str) -> pd.DataFrame:
+    if metric_table is None or metric_table.empty:
+        return pd.DataFrame()
+
+    metric_table = metric_table.dropna(how="all").sort_index()
+
+    if anchor_column not in metric_table.columns:
+        return metric_table
+
+    anchor_dates = metric_table.index[metric_table[anchor_column].notna()]
+
+    if len(anchor_dates) == 0:
+        return metric_table
+
+    return metric_table.loc[anchor_dates].dropna(how="all")
+
+
 class MarketHealthDashboardViewer:
     def __init__(self):
         self.universe_names = list(UNIVERSES.keys())
@@ -828,6 +850,7 @@ class MarketHealthDashboardViewer:
 
         self.mode = DEFAULT_MODE if DEFAULT_MODE in MODE_OPTIONS else "1M"
         self.sort_by_gain = False
+        self.include_crypto = True
 
         self.data_cache = {}
         self.universe_cache = {}
@@ -850,6 +873,7 @@ class MarketHealthDashboardViewer:
             top=0.89,
         )
 
+        crypto_ax = self.fig.add_axes([0.015, 0.935, 0.12, 0.045])
         prev_ax = self.fig.add_axes([0.12, 0.045, 0.12, 0.05])
         mode_ax = self.fig.add_axes([0.28, 0.045, 0.13, 0.05])
         universe_ax = self.fig.add_axes([0.45, 0.045, 0.18, 0.05])
@@ -861,11 +885,14 @@ class MarketHealthDashboardViewer:
         self.universe_button = Button(universe_ax, self.get_universe_button_text())
         self.sort_button = Button(sort_ax, "Sort: On")
         self.next_button = Button(next_ax, "Next")
+        self.crypto_checkbox = CheckButtons(crypto_ax, ["Crypto"], [self.include_crypto])
 
         self.prev_button.on_clicked(self.previous_date)
+        self.mode_button.on_clicked(self.cycle_mode)
         self.universe_button.on_clicked(self.cycle_universe_button)
         self.sort_button.on_clicked(self.toggle_sort)
         self.next_button.on_clicked(self.next_date)
+        self.crypto_checkbox.on_clicked(self.toggle_crypto)
 
         self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
 
@@ -924,7 +951,14 @@ class MarketHealthDashboardViewer:
             if self.mode not in data["metric_tables"]:
                 self.mode = "1M"
 
-            self.metric_table = data["metric_tables"][self.mode].dropna(how="all").sort_index()
+            raw_metric_table = data["metric_tables"][self.mode].dropna(how="all").sort_index()
+
+            if self.get_current_universe_name() == "US Macro":
+                self.metric_table = filter_metric_table_to_anchor_dates(raw_metric_table, "S&P 500")
+            elif self.get_current_universe_name() == "ASX Macro":
+                self.metric_table = filter_metric_table_to_anchor_dates(raw_metric_table, "S&P/ASX 200")
+            else:
+                self.metric_table = raw_metric_table
 
         self.dates = list(self.metric_table.index)
 
@@ -950,14 +984,30 @@ class MarketHealthDashboardViewer:
     def get_current_date(self) -> pd.Timestamp:
         return self.dates[self.date_index]
 
+    def filter_crypto_values(self, values: pd.Series) -> pd.Series:
+        if self.include_crypto:
+            return values
+
+        return values[
+            [
+                name for name in values.index
+                if self.groups.get(name, "Other") != "Crypto"
+            ]
+        ]
+
+    def toggle_crypto(self, label=None):
+        self.include_crypto = not self.include_crypto
+        self.draw()
+
     def draw_breadth(self, data: dict):
         universe_name = self.get_current_universe_name()
         current_date = self.get_current_date()
 
         values = self.metric_table.loc[current_date].dropna()
+        values = self.filter_crypto_values(values)
 
         if values.empty:
-            self.ax.set_title(f"No breadth data available on {current_date:%d %b %Y}")
+            self.ax.set_title(f"No non-crypto breadth data available on {current_date:%d %b %Y}")
             self.fig.canvas.draw_idle()
             return
 
@@ -1054,9 +1104,10 @@ class MarketHealthDashboardViewer:
             return
 
         values = self.metric_table.loc[current_date].dropna()
+        values = self.filter_crypto_values(values)
 
         if values.empty:
-            self.ax.set_title(f"No data available for {universe_name} on {current_date:%d %b %Y}")
+            self.ax.set_title(f"No non-crypto data available for {universe_name} on {current_date:%d %b %Y}")
             self.fig.canvas.draw_idle()
             return
 

@@ -1,7 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import norgatedata
-from matplotlib.widgets import Button
+from matplotlib.widgets import Button, CheckButtons
 from matplotlib.patches import Patch
 
 
@@ -184,6 +184,16 @@ FOREX_USD_MARKETS = {
         "group": "Other",
         "candidates": [("ZWLUSD", False), ("USDZWL", True)],
     },
+    "Bitcoin": {
+        "code": "BTC",
+        "group": "Crypto",
+        "candidates": [("BTCUSD", False), ("USDBTC", True)],
+    },
+    "Ethereum": {
+        "code": "ETH",
+        "group": "Crypto",
+        "candidates": [("ETHUSD", False), ("USDETH", True)],
+    },
 }
 
 
@@ -193,6 +203,7 @@ GROUP_COLORS = {
     "Asia": "#ff9f1c",
     "Emerging": "#000000",
     "Other": "#666666",
+    "Crypto": "#ffe300",
 }
 
 
@@ -472,6 +483,7 @@ class ForexDashboardViewer:
     def __init__(self):
         self.mode = DEFAULT_MODE if DEFAULT_MODE in MODE_OPTIONS else "1D"
         self.sort_by_gain = True
+        self.include_crypto = True
 
         self.data = load_forex_data()
         self.metric_table = None
@@ -500,20 +512,23 @@ class ForexDashboardViewer:
             top=0.86,
         )
 
-        prev_ax = self.fig.add_axes([0.14, 0.045, 0.12, 0.05])
-        mode_ax = self.fig.add_axes([0.31, 0.045, 0.16, 0.05])
-        sort_ax = self.fig.add_axes([0.52, 0.045, 0.14, 0.05])
-        next_ax = self.fig.add_axes([0.71, 0.045, 0.12, 0.05])
+        prev_ax = self.fig.add_axes([0.12, 0.045, 0.12, 0.05])
+        mode_ax = self.fig.add_axes([0.28, 0.045, 0.16, 0.05])
+        sort_ax = self.fig.add_axes([0.48, 0.045, 0.14, 0.05])
+        next_ax = self.fig.add_axes([0.66, 0.045, 0.12, 0.05])
+        crypto_ax = self.fig.add_axes([0.015, 0.935, 0.12, 0.045])
 
         self.prev_button = Button(prev_ax, "Previous")
         self.mode_button = Button(mode_ax, f"Mode: {self.mode}")
         self.sort_button = Button(sort_ax, "Sort: On")
         self.next_button = Button(next_ax, "Next")
+        self.crypto_checkbox = CheckButtons(crypto_ax, ["Crypto"], [self.include_crypto])
 
         self.prev_button.on_clicked(self.previous_date)
         self.mode_button.on_clicked(self.cycle_mode)
         self.sort_button.on_clicked(self.toggle_sort)
         self.next_button.on_clicked(self.next_date)
+        self.crypto_checkbox.on_clicked(self.toggle_crypto)
 
         self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
 
@@ -580,15 +595,31 @@ class ForexDashboardViewer:
 
         return title, x_label
 
+    def filter_crypto_values(self, values: pd.Series) -> pd.Series:
+        if self.include_crypto:
+            return values
+
+        return values[
+            [
+                name for name in values.index
+                if self.groups.get(name, "Other") != "Crypto"
+            ]
+        ]
+
+    def toggle_crypto(self, label=None):
+        self.include_crypto = not self.include_crypto
+        self.draw()
+
     def draw(self):
         self.ax.clear()
         self.ax.set_facecolor("white")
 
         current_date = self.get_current_date()
         values = self.metric_table.loc[current_date].dropna()
+        values = self.filter_crypto_values(values)
 
         if values.empty:
-            self.ax.set_title(f"No Forex data available on {current_date:%d %b %Y}")
+            self.ax.set_title(f"No non-crypto Forex data available on {current_date:%d %b %Y}")
             self.fig.canvas.draw_idle()
             return
 
